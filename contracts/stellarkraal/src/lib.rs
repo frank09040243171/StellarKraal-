@@ -865,6 +865,13 @@ impl StellarKraal {
             (symbol_short!("loan"), Symbol::new(&env, "requested")),
             (loan_id, borrower.clone(), amount, disbursement, total_collateral_value),
         );
+        Self::publish_loan_transition(
+            &env,
+            loan_id,
+            &borrower,
+            Symbol::new(&env, "pending"),
+            Symbol::new(&env, "active"),
+        );
 
         Ok(loan_id)
     }
@@ -890,6 +897,7 @@ impl StellarKraal {
         if loan.borrower != borrower {
             return Err(Error::Unauthorized);
         }
+        let previous_status = loan.status.clone();
         if loan.status != LoanStatus::Active {
             return Err(Error::LoanAlreadyClosed);
         }
@@ -951,6 +959,13 @@ impl StellarKraal {
             (Symbol::new(&env, "loan_repaid"), borrower.clone()),
             (loan_id, principal_paid, interest_paid, loan.outstanding),
         );
+        Self::publish_loan_transition(
+            &env,
+            loan_id,
+            &borrower,
+            Self::status_symbol(&env, &previous_status),
+            Self::status_symbol(&env, &loan.status),
+        );
 
         Ok(())
     }
@@ -980,6 +995,7 @@ impl StellarKraal {
         if loan.status != LoanStatus::Active {
             return Err(Error::LoanAlreadyClosed);
         }
+        let previous_status = loan.status.clone();
 
         let liq_thr: u32 = env.storage().instance().get(&LIQ_THR).unwrap();
         let close_factor: u32 = env.storage().instance().get(&CLOSE_FACTOR).unwrap();
@@ -1023,6 +1039,13 @@ impl StellarKraal {
         env.events().publish(
             (symbol_short!("loan"), Symbol::new(&env, "liquidated")),
             (loan_id, liquidator.clone(), repay_amount, loan.outstanding, loan.status.clone()),
+        );
+        Self::publish_loan_transition(
+            &env,
+            loan_id,
+            &borrower,
+            Self::status_symbol(&env, &previous_status),
+            Self::status_symbol(&env, &loan.status),
         );
 
         // suppress unused-variable warning; collateral_seized is available to off-chain observers via events if needed
@@ -1841,6 +1864,27 @@ impl StellarKraal {
     }
 
     // ── internal helpers ──────────────────────────────────────────────────
+    fn status_symbol(env: &Env, status: &LoanStatus) -> Symbol {
+        match status {
+            LoanStatus::Active => Symbol::new(env, "active"),
+            LoanStatus::Repaid => Symbol::new(env, "repaid"),
+            LoanStatus::Liquidated => Symbol::new(env, "liquidated"),
+        }
+    }
+
+    fn publish_loan_transition(
+        env: &Env,
+        loan_id: u64,
+        borrower: &Address,
+        from_status: Symbol,
+        to_status: Symbol,
+    ) {
+        env.events().publish(
+            (symbol_short!("loan"), Symbol::new(env, "transition")),
+            (loan_id, borrower.clone(), from_status, to_status, env.ledger().timestamp()),
+        );
+    }
+
     fn assert_initialized(env: &Env) -> Result<(), Error> {
         if !env.storage().instance().has(&ADMIN) {
             return Err(Error::NotInitialized);

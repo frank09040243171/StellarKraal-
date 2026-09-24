@@ -1539,6 +1539,29 @@ fn test_loan_requested_event_emitted() {
 }
 
 #[test]
+fn test_loan_transition_event_schema() {
+    let (env, cid, admin, oracle, token, treasury) = setup();
+    init(&env, &cid, &admin, &oracle, &token, &treasury);
+    let client = StellarKraalClient::new(&env, &cid);
+    let borrower = Address::generate(&env);
+    let col_id = client.register_livestock(&borrower, &symbol_short!("cattle"), &2u32, &100_000_000i128);
+    let loan_id = client.request_loan(&borrower, &vec![&env, col_id], &20_000_000i128, &None);
+
+    let events = env.events().all();
+    let topic = vec![
+        &env,
+        symbol_short!("loan").into_val(&env),
+        Symbol::new(&env, "transition").into_val(&env),
+    ];
+    let event = events.iter().find(|event| event.1 == topic).expect("transition event missing");
+    let data: (u64, Address, Symbol, Symbol, u64) = event.2.try_into_val(&env).unwrap();
+    assert_eq!(data.0, loan_id);
+    assert_eq!(data.1, borrower);
+    assert_eq!(data.2, Symbol::new(&env, "pending"));
+    assert_eq!(data.3, Symbol::new(&env, "active"));
+}
+
+#[test]
 fn test_loan_repaid_event() {
     let (env, cid, admin, oracle, token, treasury) = setup();
     init(&env, &cid, &admin, &oracle, &token, &treasury);
