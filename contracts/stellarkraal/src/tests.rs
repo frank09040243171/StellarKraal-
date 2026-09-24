@@ -340,6 +340,37 @@ fn test_loan_ttl_set_on_create() {
 
 // ── request_loan ──────────────────────────────────────────────────────
 #[test]
+fn test_loan_cooldown_blocks_repeated_request() {
+    let (env, cid, admin, oracle, token, treasury) = setup();
+    init(&env, &cid, &admin, &oracle, &token, &treasury);
+    let client = StellarKraalClient::new(&env, &cid);
+    let borrower = Address::generate(&env);
+    env.ledger().with_mut(|li| li.sequence_number = 10);
+    client.set_loan_cooldown(&admin, &100);
+    assert_eq!(client.get_loan_cooldown(), 100);
+    let col_id = client.register_livestock(&borrower, &symbol_short!("cattle"), &2u32, &100_000_000i128);
+    client.request_loan(&borrower, &vec![&env, col_id], &20_000_000i128, &None);
+
+    let result = client.try_request_loan(&borrower, &vec![&env, col_id], &20_000_000i128, &None);
+    assert_eq!(result, Err(Ok(Error::CooldownActive)));
+}
+
+#[test]
+fn test_loan_cooldown_allows_exact_boundary() {
+    let (env, cid, admin, oracle, token, treasury) = setup();
+    init(&env, &cid, &admin, &oracle, &token, &treasury);
+    let client = StellarKraalClient::new(&env, &cid);
+    let borrower = Address::generate(&env);
+    env.ledger().with_mut(|li| li.sequence_number = 10);
+    let col_id = client.register_livestock(&borrower, &symbol_short!("cattle"), &2u32, &100_000_000i128);
+    client.request_loan(&borrower, &vec![&env, col_id], &20_000_000i128, &None);
+
+    env.ledger().with_mut(|li| li.sequence_number = 110);
+    let loan_id = client.request_loan(&borrower, &vec![&env, col_id], &20_000_000i128, &None);
+    assert_eq!(loan_id, 2);
+}
+
+#[test]
 fn test_request_loan_within_ltv() {
     let (env, cid, admin, oracle, token, treasury) = setup();
     init(&env, &cid, &admin, &oracle, &token, &treasury);
