@@ -309,6 +309,31 @@ fn test_register_zero_value_fails() {
     client.register_livestock(&owner, &symbol_short!("sheep"), &3u32, &0i128);
 }
 
+#[test]
+fn test_collateral_minimum_rejects_below_boundary() {
+    let (env, cid, admin, oracle, token, treasury) = setup();
+    init(&env, &cid, &admin, &oracle, &token, &treasury);
+    let client = StellarKraalClient::new(&env, &cid);
+    let owner = Address::generate(&env);
+    client.set_min_collateral_value(&admin, &1_000i128);
+    assert_eq!(client.get_min_collateral_value(), 1_000);
+
+    let result = client.try_register_livestock(&owner, &symbol_short!("goat"), &1u32, &999i128);
+    assert_eq!(result, Err(Ok(Error::CollateralValueTooLow)));
+    let id = client.register_livestock(&owner, &symbol_short!("goat"), &1u32, &1_000i128);
+    assert_eq!(id, 1);
+}
+
+#[test]
+fn test_collateral_minimum_non_admin_fails() {
+    let (env, cid, admin, oracle, token, treasury) = setup();
+    init(&env, &cid, &admin, &oracle, &token, &treasury);
+    let client = StellarKraalClient::new(&env, &cid);
+    let attacker = Address::generate(&env);
+    let result = client.try_set_min_collateral_value(&attacker, &1_000i128);
+    assert_eq!(result, Err(Ok(Error::Unauthorized)));
+}
+
 // ── TTL management ────────────────────────────────────────────────────
 #[test]
 fn test_collateral_ttl_set_on_register() {

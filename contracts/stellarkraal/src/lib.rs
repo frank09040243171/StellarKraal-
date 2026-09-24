@@ -56,6 +56,7 @@ const WL_COUNT: Symbol = symbol_short!("WLCOUNT");  // number of whitelisted liq
 // ── Issue #700 storage keys ──────────────────────────────────────────────────
 const MIN_LOAN: Symbol = symbol_short!("MINLOAN"); // minimum loan amount in stroops
 const MAX_LOAN: Symbol = symbol_short!("MAXLOAN"); // maximum loan amount in stroops
+const MIN_COLLATERAL: Symbol = symbol_short!("MINCOL");
 
 // ── Issue #669 storage keys ──────────────────────────────────────────────────
 const PNDG_WASM: Symbol = symbol_short!("PNDGWASM");
@@ -78,6 +79,9 @@ pub const DEFAULT_MIN_LOAN: i128 = 10_000_000;
 
 /// Default maximum loan amount: 1,000,000,000,000 stroops (100,000 XLM).
 pub const DEFAULT_MAX_LOAN: i128 = 1_000_000_000_000;
+
+/// Default minimum appraised value accepted for collateral registration.
+pub const DEFAULT_MIN_COLLATERAL: i128 = 1;
 
 // ── TTL management ───────────────────────────────────────────────────────────
 
@@ -138,6 +142,8 @@ pub enum Error {
     TimelockNotElapsed = 25,
     /// `remove_oracle` would leave zero oracles while active loans exist.
     OracleRequired = 26,
+    /// Collateral appraised value is below the configured protocol minimum.
+    CollateralValueTooLow = 28,
 }
 
 // ── Types ────────────────────────────────────────────────────────────────────
@@ -383,6 +389,7 @@ impl StellarKraal {
         // Issue #700: loan amount limits (configurable, defaulting to 1 XLM / 100 000 XLM)
         env.storage().instance().set(&MIN_LOAN, &DEFAULT_MIN_LOAN);
         env.storage().instance().set(&MAX_LOAN, &DEFAULT_MAX_LOAN);
+        env.storage().instance().set(&MIN_COLLATERAL, &DEFAULT_MIN_COLLATERAL);
         Ok(())
     }
 
@@ -591,6 +598,35 @@ impl StellarKraal {
         Ok(())
     }
 
+    pub fn set_min_collateral_value(
+        env: Env,
+        admin: Address,
+        min_value: i128,
+    ) -> Result<(), Error> {
+        Self::assert_initialized(&env)?;
+        Self::assert_admin(&env, &admin)?;
+        admin.require_auth();
+        if min_value <= 0 {
+            return Err(Error::InvalidAmount);
+        }
+        let old_value: i128 = env
+            .storage()
+            .instance()
+            .get(&MIN_COLLATERAL)
+            .unwrap_or(DEFAULT_MIN_COLLATERAL);
+        env.storage().instance().set(&MIN_COLLATERAL, &min_value);
+        env.events().publish(
+            (symbol_short!("Admin"), symbol_short!("MinColl")),
+            (old_value, min_value),
+        );
+        Ok(())
+    }
+
+    pub fn get_min_collateral_value(env: Env) -> Result<i128, Error> {
+        Self::assert_initialized(&env)?;
+        Ok(env.storage().instance().get(&MIN_COLLATERAL).unwrap_or(DEFAULT_MIN_COLLATERAL))
+    }
+
     // ── get_liquidation_threshold ─────────────────────────────────────────
     /// Return the current liquidation threshold in basis points.
     ///
@@ -660,6 +696,14 @@ impl StellarKraal {
         Self::assert_not_paused(&env)?;
         if appraised_value <= 0 || count == 0 {
             return Err(Error::InvalidAmount);
+        }
+        let min_value: i128 = env
+            .storage()
+            .instance()
+            .get(&MIN_COLLATERAL)
+            .unwrap_or(DEFAULT_MIN_COLLATERAL);
+        if appraised_value < min_value {
+            return Err(Error::CollateralValueTooLow);
         }
         if let Some(max_value) = env
             .storage()
