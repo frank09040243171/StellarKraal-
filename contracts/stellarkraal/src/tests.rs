@@ -1294,6 +1294,16 @@ fn test_cancel_upgrade_no_proposal_fails() {
 }
 
 #[test]
+fn test_upgrade_non_admin_fails() {
+    let (env, cid, admin, oracle, token, treasury) = setup();
+    init(&env, &cid, &admin, &oracle, &token, &treasury);
+    let client = StellarKraalClient::new(&env, &cid);
+    let attacker = Address::generate(&env);
+    let result = client.try_upgrade(&attacker, &zero_wasm_hash(&env));
+    assert_eq!(result, Err(Ok(Error::Unauthorized)));
+}
+
+#[test]
 #[should_panic(expected = "#3")]
 fn test_propose_upgrade_non_admin_fails() {
     let (env, cid, admin, oracle, token, treasury) = setup();
